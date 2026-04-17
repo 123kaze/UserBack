@@ -14,7 +14,7 @@ def _patched_get_server_version_info(self, connection):
 
 PGDialect._get_server_version_info = _patched_get_server_version_info
 
-DATABASE_URL = "postgresql+psycopg2://kaze:Kaze%40123456@localhost:5432/employee_db"
+DATABASE_URL = "postgresql+psycopg2://kaze:Kaze%40654321@localhost:5432/employee_db"
 
 engine = create_engine(DATABASE_URL, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app import schemas, crud
 from app.database import get_db
+from typing import List
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[schemas.EmployeeResponse])
+@router.get("/", response_model=List[schemas.EmployeeResponse])
 def list_employees(
     name: str = None,
     department_id: int = None,

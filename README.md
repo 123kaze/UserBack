@@ -167,6 +167,100 @@ curl -X POST http://localhost:8000/employees \
 | 资源不存在 | 404 |
 | 参数校验失败 | 422 |
 
+## 遇到的问题
+
+### 问题：VS Code Remote-SSH 连接远程服务器失败
+
+**现象：** 使用 VScode IDE 的 Remote-SSH 功能连接远程 Linux 服务器时，反复弹出密码框，或者连接后立即断开，日志中出现如下错误：
+
+```
+channel 3: open failed: administratively prohibited: open failed
+Error while creating SOCKS connection Error: Socket closed
+```
+
+**背景知识：** VS Code 的 Remote-SSH 工作原理分为三步：
+
+1. **SSH 认证**：本地 IDE 通过 SSH 协议连接到远程服务器（公钥认证或密码认证）
+2. **安装远程服务端**：认证成功后，IDE 会在远程服务器的 `~/.vscode-server/` 目录下安装一个后台服务进程
+3. **端口转发**：IDE 通过 SSH 的 **TCP 端口转发**（`-D` 参数，SOCKS 代理）将本地端口映射到远程服务端口，实现本地 IDE 与远程服务端的双向通信
+
+其中第 3 步依赖 SSH 服务端的 **TCP 转发功能**。如果服务端禁用了此功能，IDE 虽然能认证成功，但无法建立数据通道，导致连接失败。
+
+**根因：** 远程服务器的 SSH 配置文件 `/etc/ssh/sshd_config` 中禁用了 TCP 转发：
+
+```bash
+AllowTcpForwarding no   # 禁止 TCP 端口转发（Windsurf 必需）
+GatewayPorts no         # 禁止网关端口
+PermitTunnel no         # 禁止隧道
+```
+
+这是很多云服务器（如华为云 openEuler）的**默认安全策略**，出于安全考虑默认关闭了转发功能。
+
+**解决方法：** 修改远程服务器的 `/etc/ssh/sshd_config`，启用 TCP 转发：
+
+```bash
+# 编辑 sshd 配置
+sudo vi /etc/ssh/sshd_config
+
+# 找到以下配置项，改为 yes（如果没有则添加到文件末尾）
+AllowTcpForwarding yes
+GatewayPorts yes
+PermitTunnel yes
+
+# 重启 sshd 使配置生效
+sudo systemctl restart sshd
+```
+
+> **安全提示：** 开启 TCP 转发会允许 SSH 用户创建端口转发隧道。在生产环境中，建议仅对特定用户开启，而非全局开启。
+
+---
+
+### 问题：SSH 密钥认证 vs 密码认证混淆
+
+**现象：** SSH 连接时反复弹出密码框，输入正确密码后仍然认证失败。
+
+**根因：** SSH 私钥文件（如 `~/.ssh/id_rsa`、`~/.ssh/id_ed25519`）设置了 **passphrase（密码短语）** 保护。当 IDE 弹出密码框时，它可能在请求：
+
+- **密钥的 passphrase**（用于解密本地私钥文件）
+- **服务器的登录密码**（用于密码认证）
+
+这两者容易混淆。如果服务器的 `authorized_keys` 中没有你的公钥，SSH 会回退到密码认证，而你输入的 passphrase 会被当作服务器密码，导致认证失败。
+
+**解决方法：** 将本地公钥部署到远程服务器，实现免密码登录：
+
+```bash
+# 方法 1：使用 ssh-copy-id（Linux/macOS）
+ssh-copy-id -i ~/.ssh/id_ed25519.pub root@服务器IP
+
+# 方法 2：手动复制（Windows 或无 ssh-copy-id 时）
+# 查看本地公钥
+cat ~/.ssh/id_ed25519.pub
+
+# 登录远程服务器，将公钥追加到 authorized_keys
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "你的公钥内容" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+部署公钥后，SSH 会自动使用密钥认证，不再需要输入服务器密码。如果私钥有 passphrase，可以使用 `ssh-agent` 缓存，避免每次都输入：
+
+```bash
+# 启动 ssh-agent 并添加密钥（输入一次 passphrase 后会缓存）
+eval $(ssh-agent)
+ssh-add ~/.ssh/id_ed25519
+```
+
+---
+
+### 问题排查思路总结
+
+遇到 Remote-SSH 连不上时，按以下顺序排查：
+
+1. **网络层**：`ping 服务器IP` 或 `Test-NetConnection -ComputerName IP -Port 22` 确认端口可达
+2. **认证层**：`ssh -v user@host` 查看详细认证过程，确认是密钥认证还是密码认证
+3. **转发层**：检查 `/etc/ssh/sshd_config` 中的 `AllowTcpForwarding` 是否为 `yes`
+4. **服务端层**：检查远程 `~/.windsurf-server/` 目录下的日志，确认 IDE 服务端是否正常启动
+
 ## License
 
 MIT
